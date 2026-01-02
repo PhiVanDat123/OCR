@@ -1,0 +1,30 @@
+# Backend
+fastapi==0.109.0
+uvicorn==0.27.0
+python-multipart==0.0.6
+
+# OCR - DeepSeek OCR
+torch>=2.0.0
+transformers>=4.46.0
+tokenizers>=0.20.0
+einops
+addict
+easydict
+# flash-attn>=2.7.0  # Uncomment if you have CUDA 11.8+
+
+# OCR - Tesseract (fallback)
+pytesseract==0.3.10
+Pillow==10.2.0
+pdf2image==1.17.0
+
+# LLM
+openai==1.12.0
+anthropic==0.18.0
+
+# Frontend
+streamlit==1.31.0
+requests==2.31.0
+
+# XML Processing
+lxml==5.1.0
+defusedxml==0.7.1
