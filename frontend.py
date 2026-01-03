@@ -1,124 +1,11 @@
-"""Streamlit Frontend for OCR Pipeline - API Only Mode."""
-import streamlit as st
+"""Gradio Frontend for OCR Pipeline - API Only Mode."""
+import gradio as gr
 import requests
-from io import BytesIO
 import xml.dom.minidom
+from typing import Tuple, Optional
 
 # Configuration
 BACKEND_URL = "http://localhost:8000"
-
-# Page config
-st.set_page_config(
-    page_title="DeepSeek OCR Pipeline - API Mode",
-    page_icon="📝",
-    layout="wide"
-)
-
-# Custom CSS
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1E88E5;
-        text-align: center;
-        margin-bottom: 1rem;
-    }
-    .sub-header {
-        font-size: 1.2rem;
-        color: #666;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .provider-badge {
-        background-color: #e3f2fd;
-        border-radius: 5px;
-        padding: 0.3rem 0.6rem;
-        font-size: 0.8rem;
-        color: #1565c0;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Header
-st.markdown('<div class="main-header">📝 DeepSeek OCR Pipeline</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Ảnh → DeepSeek-OCR (API) → XML → LLM Paraphrase → XML sạch</div>', unsafe_allow_html=True)
-
-# Sidebar
-with st.sidebar:
-    st.header("⚙️ Cài đặt OCR")
-    
-    ocr_provider = st.selectbox(
-        "OCR Provider",
-        options=["replicate", "clarifai", "mock"],
-        index=0,
-        help="""
-        - **replicate**: ~$0.011/lần chạy (khuyên dùng)
-        - **clarifai**: Có free tier
-        - **mock**: Dữ liệu mẫu để test
-        """
-    )
-    
-    if ocr_provider == "replicate":
-        st.info("💡 Replicate: ~90 lần chạy/$1")
-        st.caption("Lấy token tại: replicate.com/account/api-tokens")
-    elif ocr_provider == "clarifai":
-        st.info("💡 Clarifai có free tier")
-        st.caption("Lấy PAT tại: clarifai.com/settings/security")
-    
-    ocr_prompt = st.text_area(
-        "Custom Prompt (tùy chọn)",
-        placeholder="Convert the document to markdown.",
-        height=80,
-        help="Để trống để dùng prompt mặc định"
-    )
-    
-    st.divider()
-    
-    st.header("🤖 Cài đặt LLM")
-    
-    use_mock_llm = st.checkbox("Sử dụng Mock LLM (Demo)", value=True, 
-                               help="Bật để test mà không cần API key")
-    
-    llm_provider = st.selectbox(
-        "LLM Provider",
-        options=["openai", "anthropic"],
-        disabled=use_mock_llm
-    )
-    
-    st.divider()
-    
-    st.header("📊 Pipeline Flow")
-    st.markdown("""
-    1. **Upload ảnh** 📤
-    2. **DeepSeek-OCR API** 📝
-    3. **Chuyển thành XML** 📄
-    4. **LLM paraphrase** 🤖
-    5. **Hiển thị kết quả** ✅
-    """)
-    
-    st.divider()
-    
-    # Check backend status
-    try:
-        response = requests.get(f"{BACKEND_URL}/config", timeout=2)
-        if response.status_code == 200:
-            st.success("✅ Backend đang hoạt động")
-            cfg = response.json()
-            st.caption(f"OCR: {cfg.get('ocr_provider', 'N/A')}")
-            if cfg.get('replicate_configured'):
-                st.caption("✅ Replicate API đã cấu hình")
-            else:
-                st.caption("⚠️ Replicate API chưa cấu hình")
-            if cfg.get('clarifai_configured'):
-                st.caption("✅ Clarifai API đã cấu hình")
-            else:
-                st.caption("⚠️ Clarifai API chưa cấu hình")
-        else:
-            st.error("❌ Backend không phản hồi")
-    except:
-        st.error("❌ Không kết nối được Backend")
-        st.info("Chạy: `python backend.py`")
 
 
 def format_xml(xml_string: str) -> str:
@@ -130,176 +17,371 @@ def format_xml(xml_string: str) -> str:
         return xml_string
 
 
-# Main content
-col1, col2 = st.columns([1, 1])
+def check_backend_status() -> str:
+    """Check if backend is running and return status."""
+    try:
+        response = requests.get(f"{BACKEND_URL}/config", timeout=2)
+        if response.status_code == 200:
+            cfg = response.json()
+            status = "✅ Backend đang hoạt động\n\n"
+            status += f"📝 OCR Provider: {cfg.get('ocr_provider', 'N/A')}\n"
+            status += f"{'✅' if cfg.get('replicate_configured') else '⚠️'} Replicate API\n"
+            status += f"{'✅' if cfg.get('clarifai_configured') else '⚠️'} Clarifai API\n"
+            status += f"{'✅' if cfg.get('openai_configured') else '⚠️'} OpenAI API\n"
+            status += f"{'✅' if cfg.get('anthropic_configured') else '⚠️'} Anthropic API"
+            return status
+        else:
+            return "❌ Backend không phản hồi"
+    except:
+        return "❌ Không kết nối được Backend\n\nChạy: python backend.py"
 
-with col1:
-    st.header("📤 Upload ảnh")
+
+def process_ocr(
+    image,
+    ocr_provider: str,
+    ocr_prompt: str,
+    use_mock_llm: bool,
+    llm_provider: str
+) -> Tuple[str, str, str, str]:
+    """
+    Process OCR pipeline.
     
-    uploaded_file = st.file_uploader(
-        "Chọn ảnh chứa văn bản tiếng Việt",
-        type=["png", "jpg", "jpeg", "gif", "bmp", "tiff"],
-        help="Hỗ trợ: PNG, JPG, JPEG, GIF, BMP, TIFF"
+    Returns:
+        Tuple of (raw_text, raw_xml, paraphrased_xml, status_message)
+    """
+    if image is None:
+        return "", "", "", "❌ Vui lòng upload ảnh trước"
+    
+    try:
+        # Save image to bytes
+        import io
+        from PIL import Image
+        
+        # Convert numpy array to PIL Image if needed
+        if not isinstance(image, Image.Image):
+            image = Image.fromarray(image)
+        
+        # Save to bytes
+        img_byte_arr = io.BytesIO()
+        image.save(img_byte_arr, format='PNG')
+        img_byte_arr.seek(0)
+        
+        # Prepare request
+        files = {"file": ("image.png", img_byte_arr, "image/png")}
+        data = {
+            "ocr_provider": ocr_provider,
+            "use_mock_llm": str(use_mock_llm).lower(),
+            "llm_provider": llm_provider
+        }
+        
+        # Add custom prompt if provided
+        if ocr_prompt and ocr_prompt.strip():
+            data["ocr_prompt"] = ocr_prompt.strip()
+        
+        # Send request
+        response = requests.post(
+            f"{BACKEND_URL}/ocr",
+            files=files,
+            data=data,
+            timeout=120
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            raw_text = result.get("raw_text", "")
+            raw_xml = format_xml(result.get("raw_xml", ""))
+            paraphrased_xml = format_xml(result.get("paraphrased_xml", ""))
+            provider_used = result.get("ocr_provider", "N/A")
+            status = f"✅ Xử lý thành công! (Provider: {provider_used})"
+            return raw_text, raw_xml, paraphrased_xml, status
+        else:
+            error = response.json().get("detail", "Unknown error")
+            return "", "", "", f"❌ Lỗi: {error}"
+            
+    except requests.exceptions.ConnectionError:
+        return "", "", "", "❌ Không kết nối được với backend. Hãy chạy `python backend.py`"
+    except Exception as e:
+        return "", "", "", f"❌ Lỗi: {str(e)}"
+
+
+def paraphrase_xml_manual(
+    xml_content: str,
+    use_mock_llm: bool,
+    llm_provider: str
+) -> Tuple[str, str]:
+    """
+    Paraphrase XML content manually.
+    
+    Returns:
+        Tuple of (paraphrased_xml, status_message)
+    """
+    if not xml_content or not xml_content.strip():
+        return "", "❌ Vui lòng nhập XML"
+    
+    try:
+        response = requests.post(
+            f"{BACKEND_URL}/paraphrase",
+            json={
+                "xml_content": xml_content,
+                "provider": llm_provider,
+                "use_mock": use_mock_llm
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            paraphrased = format_xml(result.get("paraphrased_xml", ""))
+            return paraphrased, "✅ Paraphrase thành công!"
+        else:
+            error = response.json().get("detail", "Unknown error")
+            return "", f"❌ Lỗi: {error}"
+            
+    except Exception as e:
+        return "", f"❌ Lỗi: {str(e)}"
+
+
+def text_to_xml_convert(text: str) -> Tuple[str, str]:
+    """
+    Convert text to XML.
+    
+    Returns:
+        Tuple of (xml_result, status_message)
+    """
+    if not text or not text.strip():
+        return "", "❌ Vui lòng nhập text"
+    
+    try:
+        response = requests.post(
+            f"{BACKEND_URL}/text-to-xml",
+            data={"text": text},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            xml_result = format_xml(result.get("xml", ""))
+            return xml_result, "✅ Chuyển đổi thành công!"
+        else:
+            error = response.json().get("detail", "Unknown error")
+            return "", f"❌ Lỗi: {error}"
+            
+    except Exception as e:
+        return "", f"❌ Lỗi: {str(e)}"
+
+
+# Custom CSS
+custom_css = """
+.main-title {
+    text-align: center;
+    color: #1E88E5;
+    margin-bottom: 0.5rem;
+}
+.sub-title {
+    text-align: center;
+    color: #666;
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+}
+.status-box {
+    padding: 10px;
+    border-radius: 5px;
+    background-color: #f5f5f5;
+}
+"""
+
+# Build Gradio Interface
+with gr.Blocks(css=custom_css, title="DeepSeek OCR Pipeline") as demo:
+    
+    # Header
+    gr.Markdown(
+        """
+        # 📝 DeepSeek OCR Pipeline
+        ### Ảnh → DeepSeek-OCR (API) → XML → LLM Paraphrase → XML sạch
+        """,
+        elem_classes=["main-title"]
     )
     
-    if uploaded_file:
-        st.image(uploaded_file, caption="Ảnh đã upload", use_container_width=True)
+    with gr.Row():
+        # Left Column - Settings & Upload
+        with gr.Column(scale=1):
+            gr.Markdown("## ⚙️ Cài đặt")
+            
+            # OCR Settings
+            with gr.Group():
+                gr.Markdown("### 📝 OCR Settings")
+                ocr_provider = gr.Dropdown(
+                    choices=["replicate", "clarifai", "mock"],
+                    value="replicate",
+                    label="OCR Provider",
+                    info="replicate (~$0.011/run) | clarifai (free tier) | mock (test)"
+                )
+                
+                ocr_prompt = gr.Textbox(
+                    label="Custom Prompt (tùy chọn)",
+                    placeholder="Convert the document to markdown.",
+                    lines=2
+                )
+            
+            # LLM Settings
+            with gr.Group():
+                gr.Markdown("### 🤖 LLM Settings")
+                use_mock_llm = gr.Checkbox(
+                    label="Sử dụng Mock LLM (Demo)",
+                    value=True,
+                    info="Bật để test mà không cần API key"
+                )
+                
+                llm_provider = gr.Dropdown(
+                    choices=["openai", "anthropic"],
+                    value="openai",
+                    label="LLM Provider",
+                    interactive=True
+                )
+            
+            # Backend Status
+            with gr.Group():
+                gr.Markdown("### 📊 Backend Status")
+                status_display = gr.Textbox(
+                    label="",
+                    value=check_backend_status(),
+                    lines=6,
+                    interactive=False
+                )
+                refresh_btn = gr.Button("🔄 Refresh Status", size="sm")
+                refresh_btn.click(
+                    fn=check_backend_status,
+                    outputs=status_display
+                )
         
-        if st.button("🚀 Xử lý OCR", type="primary", use_container_width=True):
-            with st.spinner(f"Đang xử lý với {ocr_provider}..."):
-                try:
-                    # Prepare request
-                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                    data = {
-                        "ocr_provider": ocr_provider,
-                        "use_mock_llm": str(use_mock_llm).lower(),
-                        "llm_provider": llm_provider
-                    }
+        # Right Column - Main Content
+        with gr.Column(scale=2):
+            with gr.Tabs():
+                # Tab 1: OCR Processing
+                with gr.TabItem("🚀 Xử lý OCR"):
+                    with gr.Row():
+                        with gr.Column():
+                            image_input = gr.Image(
+                                label="📤 Upload ảnh",
+                                type="pil",
+                                height=300
+                            )
+                            process_btn = gr.Button(
+                                "🚀 Xử lý OCR",
+                                variant="primary",
+                                size="lg"
+                            )
+                            ocr_status = gr.Textbox(
+                                label="Trạng thái",
+                                interactive=False,
+                                lines=1
+                            )
                     
-                    # Add custom prompt if provided
-                    if ocr_prompt:
-                        data["ocr_prompt"] = ocr_prompt
+                    gr.Markdown("### 📋 Kết quả")
                     
-                    # Send request
-                    response = requests.post(
-                        f"{BACKEND_URL}/ocr",
-                        files=files,
-                        data=data,
-                        timeout=120
+                    with gr.Tabs():
+                        with gr.TabItem("📝 Raw Text"):
+                            raw_text_output = gr.Textbox(
+                                label="Text trích xuất từ OCR",
+                                lines=10,
+                                interactive=False
+                            )
+                        
+                        with gr.TabItem("📄 Raw XML"):
+                            raw_xml_output = gr.Code(
+                                label="XML gốc",
+                                language="html",
+                                lines=15
+                            )
+                            download_raw_xml = gr.Button("📥 Tải XML gốc", size="sm")
+                        
+                        with gr.TabItem("✨ Paraphrased XML"):
+                            paraphrased_xml_output = gr.Code(
+                                label="XML sau khi paraphrase",
+                                language="html",
+                                lines=15
+                            )
+                            download_paraphrased_xml = gr.Button("📥 Tải XML đã xử lý", size="sm")
+                    
+                    # Process button click
+                    process_btn.click(
+                        fn=process_ocr,
+                        inputs=[image_input, ocr_provider, ocr_prompt, use_mock_llm, llm_provider],
+                        outputs=[raw_text_output, raw_xml_output, paraphrased_xml_output, ocr_status]
+                    )
+                
+                # Tab 2: Manual Paraphrase
+                with gr.TabItem("📝 Paraphrase XML"):
+                    gr.Markdown("### Nhập XML để paraphrase")
+                    
+                    manual_xml_input = gr.Code(
+                        label="XML Input",
+                        language="html",
+                        lines=10,
+                        value='<?xml version="1.0" encoding="UTF-8"?>\n<document>\n  <paragraph>Nội dung tiếng Việt...</paragraph>\n</document>'
                     )
                     
-                    if response.status_code == 200:
-                        result = response.json()
-                        st.session_state["ocr_result"] = result
-                        st.success(f"✅ Xử lý thành công! (Provider: {result.get('ocr_provider', 'N/A')})")
-                    else:
-                        st.error(f"❌ Lỗi: {response.json().get('detail', 'Unknown error')}")
-                        
-                except requests.exceptions.ConnectionError:
-                    st.error("❌ Không kết nối được với backend. Hãy chạy `python backend.py`")
-                except Exception as e:
-                    st.error(f"❌ Lỗi: {str(e)}")
-
-with col2:
-    st.header("📋 Kết quả")
-    
-    if "ocr_result" in st.session_state:
-        result = st.session_state["ocr_result"]
-        
-        # Show OCR provider used
-        st.info(f"📝 OCR Provider: **{result.get('ocr_provider', 'N/A')}**")
-        
-        # Tabs for different views
-        tab1, tab2, tab3, tab4 = st.tabs(["📝 Raw Text", "📄 Raw XML", "✨ Paraphrased XML", "🔄 So sánh"])
-        
-        with tab1:
-            st.subheader("Text trích xuất từ OCR")
-            st.text_area("", result["raw_text"], height=300, disabled=True)
-        
-        with tab2:
-            st.subheader("XML gốc")
-            st.code(format_xml(result["raw_xml"]), language="xml")
-            st.download_button(
-                "📥 Tải XML gốc",
-                result["raw_xml"],
-                file_name="raw_output.xml",
-                mime="application/xml"
-            )
-        
-        with tab3:
-            st.subheader("XML sau khi paraphrase")
-            st.code(format_xml(result["paraphrased_xml"]), language="xml")
-            st.download_button(
-                "📥 Tải XML đã xử lý",
-                result["paraphrased_xml"],
-                file_name="paraphrased_output.xml",
-                mime="application/xml"
-            )
-        
-        with tab4:
-            st.subheader("So sánh trước/sau")
-            compare_col1, compare_col2 = st.columns(2)
-            
-            with compare_col1:
-                st.markdown("**XML gốc:**")
-                st.code(format_xml(result["raw_xml"]), language="xml")
-            
-            with compare_col2:
-                st.markdown("**XML sau paraphrase:**")
-                st.code(format_xml(result["paraphrased_xml"]), language="xml")
-    else:
-        st.info("👆 Upload ảnh và nhấn 'Xử lý OCR' để xem kết quả")
-
-
-# Additional section: Manual XML input
-st.divider()
-st.header("🔧 Công cụ bổ sung")
-
-tool_tab1, tool_tab2 = st.tabs(["📝 Paraphrase XML thủ công", "🔄 Text → XML"])
-
-with tool_tab1:
-    st.subheader("Nhập XML để paraphrase")
-    manual_xml = st.text_area(
-        "XML Input",
-        placeholder='<?xml version="1.0" encoding="UTF-8"?>\n<document>\n  <paragraph>Nội dung tiếng Việt...</paragraph>\n</document>',
-        height=200
-    )
-    
-    if st.button("🤖 Paraphrase", disabled=not manual_xml):
-        with st.spinner("Đang xử lý..."):
-            try:
-                response = requests.post(
-                    f"{BACKEND_URL}/paraphrase",
-                    json={
-                        "xml_content": manual_xml,
-                        "provider": llm_provider,
-                        "use_mock": use_mock_llm
-                    },
-                    timeout=30
-                )
+                    paraphrase_btn = gr.Button("🤖 Paraphrase", variant="primary")
+                    paraphrase_status = gr.Textbox(label="Trạng thái", interactive=False, lines=1)
+                    
+                    manual_paraphrase_output = gr.Code(
+                        label="Kết quả",
+                        language="html",
+                        lines=10
+                    )
+                    
+                    paraphrase_btn.click(
+                        fn=paraphrase_xml_manual,
+                        inputs=[manual_xml_input, use_mock_llm, llm_provider],
+                        outputs=[manual_paraphrase_output, paraphrase_status]
+                    )
                 
-                if response.status_code == 200:
-                    paraphrased = response.json()["paraphrased_xml"]
-                    st.subheader("Kết quả:")
-                    st.code(format_xml(paraphrased), language="xml")
-                else:
-                    st.error(f"Lỗi: {response.json().get('detail', 'Unknown')}")
-            except Exception as e:
-                st.error(f"Lỗi: {str(e)}")
-
-with tool_tab2:
-    st.subheader("Chuyển text thành XML")
-    manual_text = st.text_area(
-        "Text Input",
-        placeholder="Nhập văn bản tiếng Việt để chuyển thành XML...",
-        height=200
-    )
+                # Tab 3: Text to XML
+                with gr.TabItem("🔄 Text → XML"):
+                    gr.Markdown("### Chuyển text thành XML")
+                    
+                    text_input = gr.Textbox(
+                        label="Text Input",
+                        placeholder="Nhập văn bản tiếng Việt để chuyển thành XML...",
+                        lines=8
+                    )
+                    
+                    convert_btn = gr.Button("🔄 Chuyển đổi", variant="primary")
+                    convert_status = gr.Textbox(label="Trạng thái", interactive=False, lines=1)
+                    
+                    xml_output = gr.Code(
+                        label="Kết quả XML",
+                        language="html",
+                        lines=10
+                    )
+                    
+                    convert_btn.click(
+                        fn=text_to_xml_convert,
+                        inputs=[text_input],
+                        outputs=[xml_output, convert_status]
+                    )
     
-    if st.button("🔄 Chuyển đổi", disabled=not manual_text):
-        with st.spinner("Đang chuyển đổi..."):
-            try:
-                response = requests.post(
-                    f"{BACKEND_URL}/text-to-xml",
-                    data={"text": manual_text},
-                    timeout=10
-                )
-                
-                if response.status_code == 200:
-                    xml_result = response.json()["xml"]
-                    st.subheader("Kết quả XML:")
-                    st.code(format_xml(xml_result), language="xml")
-                else:
-                    st.error(f"Lỗi: {response.json().get('detail', 'Unknown')}")
-            except Exception as e:
-                st.error(f"Lỗi: {str(e)}")
+    # Footer
+    gr.Markdown(
+        """
+        ---
+        <center>
+        📝 DeepSeek OCR Pipeline v2.1 (API Only) | Backend: FastAPI | Frontend: Gradio
+        
+        Pipeline: Image → DeepSeek-OCR API → XML Structure → LLM Paraphrase → Clean XML
+        
+        Supports: Replicate API (~$0.011/run) | Clarifai API (free tier)
+        </center>
+        """,
+        elem_classes=["sub-title"]
+    )
 
 
-# Footer
-st.divider()
-st.markdown("""
-<div style="text-align: center; color: #888; font-size: 0.9rem;">
-    <p>📝 DeepSeek OCR Pipeline v2.1 (API Only) | Backend: FastAPI | Frontend: Streamlit</p>
-    <p>Pipeline: Image → DeepSeek-OCR API → XML Structure → LLM Paraphrase → Clean XML</p>
-    <p>Supports: Replicate API (~$0.011/run) | Clarifai API (free tier)</p>
-</div>
-""", unsafe_allow_html=True)
+# Launch
+if __name__ == "__main__":
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=True,
+        show_error=True
+    )
