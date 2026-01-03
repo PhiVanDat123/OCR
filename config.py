@@ -1,4 +1,4 @@
-"""Configuration settings for OCR Pipeline."""
+"""Configuration settings for OCR Pipeline - API Only Mode."""
 import os
 from dataclasses import dataclass
 
@@ -14,23 +14,16 @@ class Config:
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")  # "openai" or "anthropic"
     LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
     
-    # DeepSeek OCR Settings
-    OCR_PROVIDER: str = os.getenv("OCR_PROVIDER", "deepseek")  # "deepseek" or "tesseract"
-    DEEPSEEK_OCR_MODE: str = os.getenv("DEEPSEEK_OCR_MODE", "local")  # "local" or "api"
+    # DeepSeek OCR API Settings
+    # Option 1: Replicate API (Recommended - ~$0.011 per run, very cheap)
+    REPLICATE_API_TOKEN: str = os.getenv("REPLICATE_API_TOKEN", "")
     
-    # For local DeepSeek OCR (requires GPU)
-    DEEPSEEK_OCR_MODEL: str = "deepseek-ai/DeepSeek-OCR"
-    DEEPSEEK_OCR_DEVICE: str = os.getenv("DEEPSEEK_OCR_DEVICE", "cuda")  # "cuda" or "cpu"
-    
-    # For DeepSeek OCR via Clarifai API
+    # Option 2: Clarifai API (Has free tier)
     CLARIFAI_PAT: str = os.getenv("CLARIFAI_PAT", "")
     CLARIFAI_BASE_URL: str = "https://api.clarifai.com/v2/users/deepseek-ai/apps/deepseek-ocr/models/DeepSeek-OCR/versions/1/outputs"
     
-    # For self-hosted vLLM server
-    DEEPSEEK_VLLM_URL: str = os.getenv("DEEPSEEK_VLLM_URL", "http://localhost:8001/v1")
-    
-    # Legacy Tesseract settings (fallback)
-    TESSERACT_LANG: str = "vie+eng"  # Vietnamese + English
+    # Default OCR Provider: "replicate" (recommended) or "clarifai"
+    OCR_PROVIDER: str = os.getenv("OCR_PROVIDER", "replicate")
     
     # File Settings
     UPLOAD_DIR: str = "/tmp/ocr_uploads"

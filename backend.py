@@ -1,4 +1,4 @@
-"""FastAPI Backend for OCR Pipeline with DeepSeek-OCR."""
+"""FastAPI Backend for OCR Pipeline - API Only Mode."""
 import os
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
@@ -14,9 +14,16 @@ from llm_module import paraphrase_xml, mock_paraphrase
 os.makedirs(config.UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI(
-    title="OCR Pipeline API (DeepSeek-OCR)",
-    description="Pipeline: Image → DeepSeek-OCR → XML → LLM Paraphrase → Clean XML",
-    version="2.0.0"
+    title="OCR Pipeline API (DeepSeek-OCR via API)",
+    description="""
+    Pipeline: Image → DeepSeek-OCR (API) → XML → LLM Paraphrase → Clean XML
+    
+    Supported OCR Providers:
+    - **replicate**: Replicate API (~$0.011/run, recommended)
+    - **clarifai**: Clarifai API (has free tier)
+    - **mock**: Mock data for testing
+    """,
+    version="2.1.0"
 )
 
 # CORS middleware
@@ -47,7 +54,11 @@ class XMLParaphraseRequest(BaseModel):
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"status": "healthy", "service": "OCR Pipeline API (DeepSeek-OCR)"}
+    return {
+        "status": "healthy", 
+        "service": "OCR Pipeline API (DeepSeek-OCR via API)",
+        "version": "2.1.0"
+    }
 
 
 @app.get("/config")
@@ -55,13 +66,12 @@ async def get_config():
     """Get current configuration (without sensitive data)."""
     return {
         "ocr_provider": config.OCR_PROVIDER,
-        "ocr_mode": config.DEEPSEEK_OCR_MODE,
         "llm_provider": config.LLM_PROVIDER,
         "llm_model": config.LLM_MODEL,
+        "replicate_configured": bool(config.REPLICATE_API_TOKEN),
+        "clarifai_configured": bool(config.CLARIFAI_PAT),
         "openai_configured": bool(config.OPENAI_API_KEY),
         "anthropic_configured": bool(config.ANTHROPIC_API_KEY),
-        "clarifai_configured": bool(config.CLARIFAI_PAT),
-        "vllm_url": config.DEEPSEEK_VLLM_URL,
     }
 
 
@@ -69,27 +79,21 @@ async def get_config():
 async def process_ocr(
     file: UploadFile = File(...),
     ocr_provider: Optional[str] = Form(default=None),
-    ocr_mode: Optional[str] = Form(default=None),
     ocr_prompt: Optional[str] = Form(default=None),
     use_mock_llm: bool = Form(default=True),
     llm_provider: Optional[str] = Form(default=None)
 ):
     """
-    Complete OCR pipeline with DeepSeek-OCR:
-    1. Extract text from image using DeepSeek-OCR
+    Complete OCR pipeline with DeepSeek-OCR via API:
+    1. Extract text from image using DeepSeek-OCR API
     2. Convert to structured XML
     3. Paraphrase Vietnamese text using LLM
     4. Return clean XML
     
-    OCR Providers:
-    - deepseek: DeepSeek-OCR (default)
-    - tesseract: Tesseract OCR (fallback)
+    OCR Providers (API only):
+    - replicate: Replicate API (~$0.011 per run, very cheap)
+    - clarifai: Clarifai API (has free tier)
     - mock: Mock data for testing
-    
-    DeepSeek Modes (when ocr_provider=deepseek):
-    - local: Run model locally (requires GPU)
-    - vllm: Use vLLM server
-    - api: Use Clarifai API
     """
     # Validate file type
     allowed_types = ["image/jpeg", "image/png", "image/gif", "image/bmp", "image/tiff"]
@@ -106,11 +110,10 @@ async def process_ocr(
         raise HTTPException(status_code=400, detail="File too large (max 10MB)")
     
     try:
-        # Step 1: OCR - Extract text from image using DeepSeek-OCR
+        # Step 1: OCR - Extract text from image using DeepSeek-OCR API
         raw_text, provider_used = extract_text_from_image(
             image_data,
             provider=ocr_provider,
-            mode=ocr_mode,
             prompt=ocr_prompt
         )
         
@@ -135,6 +138,7 @@ async def process_ocr(
                 paraphrased_xml = await paraphrase_xml(raw_xml, llm_provider)
             except Exception as e:
                 # Fallback to mock if LLM fails
+                print(f"LLM error: {e}")
                 paraphrased_xml = mock_paraphrase(raw_xml)
         
         return OCRResponse(

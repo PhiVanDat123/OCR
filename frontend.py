@@ -1,4 +1,4 @@
-"""Streamlit Frontend for OCR Pipeline with DeepSeek-OCR."""
+"""Streamlit Frontend for OCR Pipeline - API Only Mode."""
 import streamlit as st
 import requests
 from io import BytesIO
@@ -9,8 +9,8 @@ BACKEND_URL = "http://localhost:8000"
 
 # Page config
 st.set_page_config(
-    page_title="DeepSeek OCR Pipeline - Tiếng Việt",
-    page_icon="🔍",
+    page_title="DeepSeek OCR Pipeline - API Mode",
+    page_icon="📝",
     layout="wide"
 )
 
@@ -41,8 +41,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Header
-st.markdown('<div class="main-header">🔍 DeepSeek OCR Pipeline</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Ảnh → DeepSeek-OCR → XML → LLM Paraphrase → XML sạch</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">📝 DeepSeek OCR Pipeline</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Ảnh → DeepSeek-OCR (API) → XML → LLM Paraphrase → XML sạch</div>', unsafe_allow_html=True)
 
 # Sidebar
 with st.sidebar:
@@ -50,32 +50,28 @@ with st.sidebar:
     
     ocr_provider = st.selectbox(
         "OCR Provider",
-        options=["deepseek", "tesseract", "mock"],
+        options=["replicate", "clarifai", "mock"],
         index=0,
-        help="DeepSeek-OCR cho kết quả tốt nhất với văn bản phức tạp"
+        help="""
+        - **replicate**: ~$0.011/lần chạy (khuyên dùng)
+        - **clarifai**: Có free tier
+        - **mock**: Dữ liệu mẫu để test
+        """
     )
     
-    ocr_mode = None
-    if ocr_provider == "deepseek":
-        ocr_mode = st.selectbox(
-            "DeepSeek Mode",
-            options=["local", "vllm", "api"],
-            index=0,
-            help="""
-            - local: Chạy model trên máy (cần GPU NVIDIA)
-            - vllm: Dùng vLLM server
-            - api: Dùng Clarifai API
-            """
-        )
-        
-        ocr_prompt = st.text_area(
-            "Custom Prompt (tùy chọn)",
-            placeholder="<image>\\n<|grounding|>Convert the document to markdown.",
-            height=80,
-            help="Để trống để dùng prompt mặc định"
-        )
-    else:
-        ocr_prompt = None
+    if ocr_provider == "replicate":
+        st.info("💡 Replicate: ~90 lần chạy/$1")
+        st.caption("Lấy token tại: replicate.com/account/api-tokens")
+    elif ocr_provider == "clarifai":
+        st.info("💡 Clarifai có free tier")
+        st.caption("Lấy PAT tại: clarifai.com/settings/security")
+    
+    ocr_prompt = st.text_area(
+        "Custom Prompt (tùy chọn)",
+        placeholder="Convert the document to markdown.",
+        height=80,
+        help="Để trống để dùng prompt mặc định"
+    )
     
     st.divider()
     
@@ -95,8 +91,8 @@ with st.sidebar:
     st.header("📊 Pipeline Flow")
     st.markdown("""
     1. **Upload ảnh** 📤
-    2. **DeepSeek-OCR** 🔍
-    3. **Chuyển thành XML** 📝
+    2. **DeepSeek-OCR API** 📝
+    3. **Chuyển thành XML** 📄
     4. **LLM paraphrase** 🤖
     5. **Hiển thị kết quả** ✅
     """)
@@ -110,7 +106,14 @@ with st.sidebar:
             st.success("✅ Backend đang hoạt động")
             cfg = response.json()
             st.caption(f"OCR: {cfg.get('ocr_provider', 'N/A')}")
-            st.caption(f"Mode: {cfg.get('ocr_mode', 'N/A')}")
+            if cfg.get('replicate_configured'):
+                st.caption("✅ Replicate API đã cấu hình")
+            else:
+                st.caption("⚠️ Replicate API chưa cấu hình")
+            if cfg.get('clarifai_configured'):
+                st.caption("✅ Clarifai API đã cấu hình")
+            else:
+                st.caption("⚠️ Clarifai API chưa cấu hình")
         else:
             st.error("❌ Backend không phản hồi")
     except:
@@ -125,16 +128,6 @@ def format_xml(xml_string: str) -> str:
         return dom.toprettyxml(indent="  ")
     except:
         return xml_string
-
-
-def render_xml_as_html(xml_string: str) -> str:
-    """Convert XML to readable HTML display."""
-    import re
-    # Simple XML to display conversion
-    formatted = xml_string.replace("<", "&lt;").replace(">", "&gt;")
-    formatted = re.sub(r'&lt;(\/?[\w-]+)', r'<span style="color:#1E88E5">&lt;\1</span>', formatted)
-    formatted = re.sub(r'(\w+)=', r'<span style="color:#E91E63">\1</span>=', formatted)
-    return f'<pre style="background:#f5f5f5; padding:1rem; border-radius:5px; overflow-x:auto;">{formatted}</pre>'
 
 
 # Main content
@@ -153,7 +146,7 @@ with col1:
         st.image(uploaded_file, caption="Ảnh đã upload", use_container_width=True)
         
         if st.button("🚀 Xử lý OCR", type="primary", use_container_width=True):
-            with st.spinner("Đang xử lý với DeepSeek-OCR..."):
+            with st.spinner(f"Đang xử lý với {ocr_provider}..."):
                 try:
                     # Prepare request
                     files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
@@ -163,9 +156,7 @@ with col1:
                         "llm_provider": llm_provider
                     }
                     
-                    # Add DeepSeek-specific options
-                    if ocr_mode:
-                        data["ocr_mode"] = ocr_mode
+                    # Add custom prompt if provided
                     if ocr_prompt:
                         data["ocr_prompt"] = ocr_prompt
                     
@@ -174,7 +165,7 @@ with col1:
                         f"{BACKEND_URL}/ocr",
                         files=files,
                         data=data,
-                        timeout=120  # Longer timeout for DeepSeek
+                        timeout=120
                     )
                     
                     if response.status_code == 200:
@@ -196,7 +187,7 @@ with col2:
         result = st.session_state["ocr_result"]
         
         # Show OCR provider used
-        st.info(f"🔍 OCR Provider: **{result.get('ocr_provider', 'N/A')}**")
+        st.info(f"📝 OCR Provider: **{result.get('ocr_provider', 'N/A')}**")
         
         # Tabs for different views
         tab1, tab2, tab3, tab4 = st.tabs(["📝 Raw Text", "📄 Raw XML", "✨ Paraphrased XML", "🔄 So sánh"])
@@ -244,7 +235,7 @@ with col2:
 st.divider()
 st.header("🔧 Công cụ bổ sung")
 
-tool_tab1, tool_tab2 = st.tabs(["📝 Paraphrase XML thủ công", "📄 Text → XML"])
+tool_tab1, tool_tab2 = st.tabs(["📝 Paraphrase XML thủ công", "🔄 Text → XML"])
 
 with tool_tab1:
     st.subheader("Nhập XML để paraphrase")
@@ -284,7 +275,7 @@ with tool_tab2:
         height=200
     )
     
-    if st.button("📄 Chuyển đổi", disabled=not manual_text):
+    if st.button("🔄 Chuyển đổi", disabled=not manual_text):
         with st.spinner("Đang chuyển đổi..."):
             try:
                 response = requests.post(
@@ -307,8 +298,8 @@ with tool_tab2:
 st.divider()
 st.markdown("""
 <div style="text-align: center; color: #888; font-size: 0.9rem;">
-    <p>🔍 DeepSeek OCR Pipeline v2.0 | Backend: FastAPI | Frontend: Streamlit</p>
-    <p>Pipeline: Image → DeepSeek-OCR → XML Structure → LLM Paraphrase → Clean XML</p>
-    <p>Supports: Local GPU, vLLM Server, Clarifai API</p>
+    <p>📝 DeepSeek OCR Pipeline v2.1 (API Only) | Backend: FastAPI | Frontend: Streamlit</p>
+    <p>Pipeline: Image → DeepSeek-OCR API → XML Structure → LLM Paraphrase → Clean XML</p>
+    <p>Supports: Replicate API (~$0.011/run) | Clarifai API (free tier)</p>
 </div>
 """, unsafe_allow_html=True)

@@ -3,19 +3,11 @@ fastapi==0.109.0
 uvicorn==0.27.0
 python-multipart==0.0.6
 
-# OCR - DeepSeek OCR
-torch>=2.0.0
-transformers>=4.46.0
-tokenizers>=0.20.0
-einops
-addict
-easydict
-# flash-attn>=2.7.0  # Uncomment if you have CUDA 11.8+
+# OCR API - Replicate (Recommended)
+replicate>=0.25.0
 
-# OCR - Tesseract (fallback)
-pytesseract==0.3.10
+# Image Processing
 Pillow==10.2.0
-pdf2image==1.17.0
 
 # LLM
 openai==1.12.0
