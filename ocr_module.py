@@ -49,9 +49,9 @@ def ocr_with_replicate(image: Image.Image, prompt: str = None) -> str:
     img_base64 = base64.b64encode(buffered.getvalue()).decode()
     image_uri = f"data:image/png;base64,{img_base64}"
     
-    # Run prediction
+    # Run prediction with latest version hash (updated Jan 2026)
     output = replicate.run(
-        "lucataco/deepseek-ocr:4a3b8002a04878de630ad71eb00d42c262b40c5dd64c9bb0ce70aaab0d38b0bf",
+        "lucataco/deepseek-ocr:cb3b474fbfc56b1664c8c7841550bccecbe7b74c30e45ce938ffca1180b4dff5",
         input={
             "image": image_uri,
             "prompt": prompt
